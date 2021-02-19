@@ -1,0 +1,17 @@
+[package]
+name = "tiny-rpc-macros"
+version = "0.1.0"
+authors = ["zhoukz <me@zhoukz.com>"]
+edition = "2018"
+license = "MIT"
+description = "Proc-macros for tiny-rpc"
+repository = "https://github.com/zhoukezi/tiny-rpc.git"
+keywords = ["rpc"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-error = "1.0.4"
+quote = "1.0.9"
+syn = { version = "1.0.60", features = ["full"] }

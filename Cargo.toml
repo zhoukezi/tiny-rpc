@@ -1,0 +1,2 @@
+[workspace]
+members = ["tiny-rpc", "tiny-rpc-macros"]

@@ -1,0 +1,23 @@
+[package]
+name = "tiny-rpc"
+version = "0.1.0"
+authors = ["zhoukz <me@zhoukz.com>"]
+edition = "2018"
+license = "MIT"
+description = "A small and easy to use RPC framework."
+repository = "https://github.com/zhoukezi/tiny-rpc.git"
+keywords = ["rpc"]
+
+[dependencies]
+err-derive = "0.3.0"
+futures = "0.3.12"
+log = "0.4.14"
+serde = "1.0.123"
+serde_derive = "1.0.123"
+tiny-rpc-macros = { version = "0.1.0", path = "../tiny-rpc-macros" }
+tokio = { version = "1.2.0", features = ["rt"] }
+
+[dev-dependencies]
+async-trait = "0.1.42"
+env_logger = "0.8.3"
+tokio = { version = "1.2.0", features = ["full"] }
