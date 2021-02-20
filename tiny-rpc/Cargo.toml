@@ -1,6 +1,6 @@
 [package]
 name = "tiny-rpc"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["zhoukz <me@zhoukz.com>"]
 edition = "2018"
 license = "MIT"
@@ -14,7 +14,7 @@ futures = "0.3.12"
 log = "0.4.14"
 serde = "1.0.123"
 serde_derive = "1.0.123"
-tiny-rpc-macros = { version = "0.1.0", path = "../tiny-rpc-macros" }
+tiny-rpc-macros = { version = "=0.1.1", path = "../tiny-rpc-macros" }
 tokio = { version = "1.2.0", features = ["rt"] }
 
 [dev-dependencies]

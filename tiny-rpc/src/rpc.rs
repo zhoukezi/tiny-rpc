@@ -1,6 +1,19 @@
 #[doc(hidden)]
 pub mod re_export {
     pub extern crate serde;
+
+    pub use std::{
+        boxed::Box,
+        pin::Pin,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc,
+        },
+    };
+
+    pub use futures::{Future, Sink, Stream};
+    pub use serde_derive::{Deserialize, Serialize};
+
     pub use super::*;
     pub use crate::error::Error;
 }

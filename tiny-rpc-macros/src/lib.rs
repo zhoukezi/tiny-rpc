@@ -161,14 +161,14 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
 
         #trait_body
 
-        #[derive(::serde_derive::Serialize, ::serde_derive::Deserialize)]
+        #[derive(#root::Serialize, #root::Deserialize)]
         #[serde(crate = #serde_path)]
         #[allow(non_camel_case_types)]
         pub enum #req_ident {
             #(#fn_name((#(#fn_arg_ty,)*)),)*
         }
 
-        #[derive(::serde_derive::Serialize, ::serde_derive::Deserialize)]
+        #[derive(#root::Serialize, #root::Deserialize)]
         #[serde(crate = #serde_path)]
         #[allow(non_camel_case_types)]
         pub enum #rsp_ident {
@@ -190,11 +190,11 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
             O: #root::RpcFrame<Data = #rsp_ident>,
         {
             fn make_response(
-                self: ::std::sync::Arc<Self>,
+                self: #root::Arc<Self>,
                 req: I,
                 rsp_handler: #root::ResponseHandler<O>,
-            ) -> ::std::pin::Pin<std::boxed::Box<dyn ::std::future::Future<Output = ()> + Send>> {
-                ::std::boxed::Box::pin(async move {
+            ) -> #root::Pin<#root::Box<dyn #root::Future<Output = ()> + Send>> {
+                #root::Box::pin(async move {
                     let id = I::get_id(&req);
                     let rsp = match I::get_data(req) {
                         #(
@@ -213,7 +213,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         #[derive(Debug)]
         #vis struct #api_stub_ident<'a, I, O>(
             #root::RpcClient<'a, I, O>,
-            ::std::sync::Arc<::std::sync::atomic::AtomicU64>
+            #root::Arc<#root::AtomicU64>
         )
         where
             I: #root::RpcFrame<Data = #rsp_ident>,
@@ -226,28 +226,28 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         {
             pub fn new<T, U>(recv: T, send: U) -> Self
             where
-                T: ::futures::Stream<Item = I> + Unpin + Send + 'static,
-                U: ::futures::Sink<O, Error = #root::Error> + Unpin + Send + 'static,
+                T: #root::Stream<Item = I> + Unpin + Send + 'static,
+                U: #root::Sink<O, Error = #root::Error> + Unpin + Send + 'static,
             {
                 Self(
                     #root::RpcClient::new(recv, send),
-                    ::std::sync::Arc::new(::std::sync::atomic::AtomicU64::new(5)),
+                    #root::Arc::new(#root::AtomicU64::new(5)),
                 )
             }
 
-            pub fn new_with_driver<T, U>(recv: T, send: U) -> (impl ::futures::Future<Output = ()> + 'a, Self)
+            pub fn new_with_driver<T, U>(recv: T, send: U) -> (impl #root::Future<Output = ()> + 'a, Self)
             where
-                T: ::futures::Stream<Item = I> + Unpin + 'a,
-                U: ::futures::Sink<O, Error = #root::Error> + Unpin + 'a,
+                T: #root::Stream<Item = I> + Unpin + 'a,
+                U: #root::Sink<O, Error = #root::Error> + Unpin + 'a,
             {
                 let (driver, client) = #root::RpcClient::new_with_driver(recv, send);
-                (driver, Self(client, ::std::sync::Arc::new(::std::sync::atomic::AtomicU64::new(5))))
+                (driver, Self(client, #root::Arc::new(#root::AtomicU64::new(5))))
             }
 
             #(
                 pub #stub_sig {
-                    let id = ::tiny_rpc::rpc::RequestId(
-                        self.1.fetch_add(1, ::std::sync::atomic::Ordering::SeqCst)
+                    let id = #root::RequestId(
+                        self.1.fetch_add(1, #root::Ordering::SeqCst)
                     );
                     let req = O::new(
                         id,
