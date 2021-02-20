@@ -186,13 +186,13 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         impl<T, I, O> #root::RpcServerStub<#rpc_ident, I, O> for #api_server_ident<T>
         where
             T: #impl_ident + Send + Sync + 'static,
-            I: #root::RpcFrame<Data = #req_ident>,
-            O: #root::RpcFrame<Data = #rsp_ident>,
+            I: #root::RpcFrame<#req_ident>,
+            O: #root::RpcFrame<#rsp_ident>,
         {
             fn make_response(
                 self: #root::Arc<Self>,
                 req: I,
-                rsp_handler: #root::ResponseHandler<O>,
+                rsp_handler: #root::ResponseHandler<#rsp_ident, O>,
             ) -> #root::Pin<#root::Box<dyn #root::Future<Output = ()> + Send>> {
                 #root::Box::pin(async move {
                     let id = I::get_id(&req);
@@ -212,17 +212,17 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
 
         #[derive(Debug)]
         #vis struct #api_stub_ident<'a, I, O>(
-            #root::RpcClient<'a, I, O>,
+            #root::RpcClient<'a, #rpc_ident, I, O>,
             #root::Arc<#root::AtomicU64>
         )
         where
-            I: #root::RpcFrame<Data = #rsp_ident>,
-            O: #root::RpcFrame<Data = #req_ident>;
+            I: #root::RpcFrame<#rsp_ident>,
+            O: #root::RpcFrame<#req_ident>;
 
         impl<'a, I, O> #api_stub_ident<'a, I, O>
         where
-            I: #root::RpcFrame<Data = #rsp_ident>,
-            O: #root::RpcFrame<Data = #req_ident>,
+            I: #root::RpcFrame<#rsp_ident>,
+            O: #root::RpcFrame<#req_ident>,
         {
             pub fn new<T, U>(recv: T, send: U) -> Self
             where
@@ -264,8 +264,8 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
 
         impl<'a, I, O> Clone for #api_stub_ident<'a, I, O>
         where
-            I: #root::RpcFrame<Data = #rsp_ident>,
-            O: #root::RpcFrame<Data = #req_ident>,
+            I: #root::RpcFrame<#rsp_ident>,
+            O: #root::RpcFrame<#req_ident>,
         {
             #[inline]
             fn clone(&self) -> Self {
