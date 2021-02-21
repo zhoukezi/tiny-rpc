@@ -16,6 +16,9 @@ serde = "1.0.123"
 serde_derive = "1.0.123"
 tiny-rpc-macros = { version = "=0.1.1", path = "../tiny-rpc-macros" }
 tokio = { version = "1.2.0", features = ["rt"] }
+bincode = "*"
+serde_json = "*"
+bytes = "*"
 
 [dev-dependencies]
 async-trait = "0.1.42"

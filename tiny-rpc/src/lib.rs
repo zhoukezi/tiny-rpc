@@ -9,6 +9,7 @@ extern crate log;
 
 pub mod error;
 pub mod rpc;
+pub mod serialize;
 #[cfg(test)]
 pub mod test;
 

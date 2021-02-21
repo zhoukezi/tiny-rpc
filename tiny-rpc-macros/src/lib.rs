@@ -172,6 +172,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         #[serde(crate = #serde_path)]
         #[allow(non_camel_case_types)]
         pub enum #rsp_ident {
+            __server_error,
             #(#fn_name(#fn_ret_ty),)*
         }
 
@@ -192,11 +193,19 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
             fn make_response(
                 self: #root::Arc<Self>,
                 req: I,
-                rsp_handler: #root::ResponseHandler<#rsp_ident, O>,
-            ) -> #root::Pin<#root::Box<dyn #root::Future<Output = ()> + Send>> {
+            ) -> #root::Pin<#root::Box<dyn #root::Future<Output = Option<O>> + Send>> {
                 #root::Box::pin(async move {
                     let id = I::get_id(&req);
-                    let rsp = match I::get_data(req) {
+                    let req = match I::get_data(req) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            #root::log::error!("failed to get request: {} {}", id, e);
+                            return O::from_parts(id, #rsp_ident::__server_error)
+                                .map_err(|e| #root::log::error!("failed to return server error: {} {}", id, e))
+                                .ok();
+                        }
+                    };
+                    let rsp = match req {
                         #(
                             #req_ident::#fn_name(_args) => {
                                 #rsp_ident::#fn_name(
@@ -205,7 +214,9 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                             }
                         )*
                     };
-                    rsp_handler.response_with(O::new(id, rsp)).await;
+                    O::from_parts(id, rsp)
+                        .map_err(|e| #root::log::error!("failed to response: {} {}", id, e))
+                        .ok()
                 })
             }
         }
@@ -249,13 +260,14 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                     let id = #root::RequestId(
                         self.1.fetch_add(1, #root::Ordering::SeqCst)
                     );
-                    let req = O::new(
+                    let req = O::from_parts(
                         id,
                         #req_ident::#fn_name((#(#stub_arg_name,)*)),
-                    );
+                    )?;
                     let rsp = self.0.make_request(req).await?;
-                    match I::get_data(rsp) {
+                    match I::get_data(rsp)? {
                         #rsp_ident::#fn_name(r) => Ok(r),
+                        #rsp_ident::__server_error => Err(#root::Error::ServerError(id)),
                         _ => Err(#root::Error::ResponseMismatch(id)),
                     }
                 }

@@ -10,6 +10,8 @@ pub enum Error {
     MissingResponse(RequestId),
     #[error(display = "unrelated respond for request {}", _0)]
     ResponseMismatch(RequestId),
+    #[error(display = "server failed to respond for request {}", _0)]
+    ServerError(RequestId),
     #[error(display = "io error: {}", _0)]
     Io(std::io::Error),
     #[error(display = "other error: {}", _0)]
