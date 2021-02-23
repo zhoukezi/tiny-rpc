@@ -8,6 +8,7 @@ extern crate self as tiny_rpc;
 extern crate log;
 
 pub mod error;
+pub mod io;
 pub mod rpc;
 pub mod serialize;
 #[cfg(test)]
