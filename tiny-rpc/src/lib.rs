@@ -1,7 +1,3 @@
-#![feature(never_type)]
-#![feature(result_flattening)]
-#![feature(async_closure)]
-
 // required to use define_rpc macro inside this crate
 extern crate self as tiny_rpc;
 #[macro_use]
