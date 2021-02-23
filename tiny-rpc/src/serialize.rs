@@ -70,6 +70,12 @@ impl<S: RpcSerializer> From<Bytes> for SerializedFrame<S> {
     }
 }
 
+impl<S: RpcSerializer> From<BytesMut> for SerializedFrame<S> {
+    fn from(value: BytesMut) -> Self {
+        Self::new(value)
+    }
+}
+
 impl<S: RpcSerializer> From<SerializedFrame<S>> for Bytes {
     fn from(value: SerializedFrame<S>) -> Self {
         value.0
