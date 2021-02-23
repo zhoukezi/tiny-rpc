@@ -16,7 +16,7 @@ pub mod re_export {
     pub use serde_derive::{Deserialize, Serialize};
 
     pub use super::*;
-    pub use crate::error::Error;
+    pub use crate::error::{Error, Result};
 }
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData, pin::Pin, sync::Arc};
@@ -27,7 +27,7 @@ use futures::{
     Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
 };
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 
 /// The `Rpc` trait defined a rpc service by definding several necessary items.
 ///
@@ -55,13 +55,13 @@ impl std::fmt::Display for RequestId {
 }
 
 pub trait RpcFrame<T>: Sized + Send + 'static {
-    fn from_parts(id: RequestId, data: T) -> Result<Self, Error>;
+    fn from_parts(id: RequestId, data: T) -> Result<Self>;
     fn get_id(&self) -> RequestId;
-    fn get_data(self) -> Result<T, Error>;
+    fn get_data(self) -> Result<T>;
 }
 
 impl<T: Sized + Send + 'static> RpcFrame<T> for (RequestId, T) {
-    fn from_parts(id: RequestId, data: T) -> Result<Self, Error> {
+    fn from_parts(id: RequestId, data: T) -> Result<Self> {
         Ok((id, data))
     }
 
@@ -69,7 +69,7 @@ impl<T: Sized + Send + 'static> RpcFrame<T> for (RequestId, T) {
         self.0
     }
 
-    fn get_data(self) -> Result<T, Error> {
+    fn get_data(self) -> Result<T> {
         Ok(self.1)
     }
 }
@@ -78,13 +78,13 @@ pub async fn serve<R, S, I, O, T, U>(
     stub: impl Into<Arc<S>>,
     mut recv: T,
     mut send: U,
-) -> Result<(), Error>
+) -> Result<()>
 where
     R: Rpc,
     S: RpcServerStub<R, I, O>,
     I: RpcFrame<R::Request>,
     O: RpcFrame<R::Response>,
-    T: Stream<Item = I> + Unpin,
+    T: Stream<Item = Result<I>> + Unpin,
     U: Sink<O, Error = Error> + Unpin,
 {
     let stub: Arc<S> = stub.into();
@@ -96,9 +96,12 @@ where
             Either::Left((Some(req), r)) => {
                 let stub = stub.clone();
                 let mut tx = tx.clone();
-                tokio::spawn(stub.make_response(req).then(move |res| async move {
+                tokio::spawn(stub.make_response(req?).then(move |res| async move {
                     if let Some(res) = res {
-                        tx.send(res).await.expect("driver closed unexpectedly")
+                        if let Err(e) = tx.send(res).await {
+                            assert!(e.is_disconnected());
+                            error!("driver closed unexpectedly");
+                        }
                     }
                 }));
                 fut = select(recv.next(), r);
@@ -116,13 +119,13 @@ where
 }
 
 pub struct RpcClient<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>>(
-    mpsc::Sender<(oneshot::Sender<Result<I, Error>>, O)>,
+    mpsc::Sender<(oneshot::Sender<Result<I>>, O)>,
     PhantomData<&'a R>,
 );
 
 impl<R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'static, R, I, O> {
     pub fn new<
-        T: Stream<Item = I> + Unpin + Send + 'static,
+        T: Stream<Item = Result<I>> + Unpin + Send + 'static,
         U: Sink<O, Error = Error> + Unpin + Send + 'static,
     >(
         recv: T,
@@ -137,23 +140,23 @@ impl<R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'stati
 impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a, R, I, O> {
     pub fn new_with_driver<T, U>(recv: T, send: U) -> (impl Future<Output = ()> + 'a, Self)
     where
-        T: Stream<Item = I> + Unpin + 'a,
+        T: Stream<Item = Result<I>> + Unpin + 'a,
         U: Sink<O, Error = Error> + Unpin + 'a,
     {
         async fn driver<'a, R, I, O, T, U>(
-            mut rx: mpsc::Receiver<(oneshot::Sender<Result<I, Error>>, O)>,
+            mut rx: mpsc::Receiver<(oneshot::Sender<Result<I>>, O)>,
             mut recv: T,
             mut send: U,
         ) where
             R: Rpc,
             I: RpcFrame<R::Response>,
             O: RpcFrame<R::Request>,
-            T: Stream<Item = I> + Unpin + 'a,
+            T: Stream<Item = Result<I>> + Unpin + 'a,
             U: Sink<O, Error = Error> + Unpin + 'a,
         {
             let mut fut = select(rx.next(), recv.next());
             let mut req_map = HashMap::with_capacity(128);
-            loop {
+            let ret = loop {
                 match fut.await {
                     Either::Left((Some((callback, req)), r)) => {
                         let id = req.get_id();
@@ -169,6 +172,10 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
                         fut = select(rx.next(), r);
                     }
                     Either::Right((Some(rsp), r)) => {
+                        let rsp = match rsp {
+                            Ok(rsp) => rsp,
+                            Err(e) => break Err(e),
+                        };
                         let id = rsp.get_id();
                         if let Some(callback) = req_map.remove(&id) {
                             callback
@@ -181,26 +188,44 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
                     }
                     _ => {
                         // None is returned from client or remote. Stop driver.
-                        break;
+                        break Ok(());
                     }
+                }
+            };
+            if let Err(e) = ret {
+                let mut e = Some(e);
+                let mut iter = req_map.into_iter();
+                while let Some((_id, r)) = iter.next() {
+                    match r.send(Err(e.take().unwrap())) {
+                        Ok(()) => break,
+                        Err(r) => {
+                            e = match r {
+                                Err(x) => Some(x),
+                                _ => unreachable!(),
+                            };
+                        }
+                    }
+                }
+                if let Some(e) = e {
+                    error!("failed to send error in driver: {}", e);
                 }
             }
         }
 
-        let (tx, rx) = mpsc::channel::<(oneshot::Sender<Result<I, Error>>, O)>(128);
+        let (tx, rx) = mpsc::channel::<(oneshot::Sender<Result<I>>, O)>(128);
         (
             driver::<'a, R, I, O, T, U>(rx, recv, send),
             Self(tx, PhantomData),
         )
     }
 
-    pub async fn make_request(&mut self, req: O) -> Result<I, Error> {
+    pub async fn make_request(&mut self, req: O) -> Result<I> {
         let (tx, rx) = oneshot::channel();
-        self.0
-            .send((tx, req))
-            .await
-            .expect("driver closed unexpectedly");
-        rx.await.expect("driver closed unexpectedly")
+        self.0.send((tx, req)).await.map_err(|e| {
+            assert!(e.is_disconnected());
+            Error::DriverStopped
+        })?;
+        rx.await.unwrap_or(Err(Error::DriverStopped))
     }
 }
 

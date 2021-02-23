@@ -1,4 +1,4 @@
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use tiny_rpc_macros::rpc_define;
 
 rpc_define! {
@@ -27,6 +27,8 @@ pub async fn run_example() {
     let (stx, crx) = futures::channel::mpsc::channel::<(crate::rpc::RequestId, HelloResponse)>(128);
     let ctx = ctx.sink_map_err(|_| panic!());
     let stx = stx.sink_map_err(|_| panic!());
+    let srx = srx.map(|e| Ok(e));
+    let crx = crx.map(|e| Ok(e));
 
     tokio::spawn(async move {
         info!("server task spawned");

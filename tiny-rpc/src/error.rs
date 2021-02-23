@@ -12,6 +12,8 @@ pub enum Error {
     ResponseMismatch(RequestId),
     #[error(display = "server failed to respond for request {}", _0)]
     ServerError(RequestId),
+    #[error(display = "driver stopped unexpectedly")]
+    DriverStopped,
     #[error(display = "io error: {}", _0)]
     Io(std::io::Error),
     #[error(display = "other error: {}", _0)]
@@ -35,3 +37,5 @@ impl<E: std::error::Error + Sync + Send + 'static> From<Box<E>> for Error {
         Self::Other(e)
     }
 }
+
+pub type Result<T> = std::result::Result<T, Error>;

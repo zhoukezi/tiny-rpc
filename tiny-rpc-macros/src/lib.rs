@@ -237,7 +237,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         {
             pub fn new<T, U>(recv: T, send: U) -> Self
             where
-                T: #root::Stream<Item = I> + Unpin + Send + 'static,
+                T: #root::Stream<Item = #root::Result<I>> + Unpin + Send + 'static,
                 U: #root::Sink<O, Error = #root::Error> + Unpin + Send + 'static,
             {
                 Self(
@@ -248,7 +248,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
 
             pub fn new_with_driver<T, U>(recv: T, send: U) -> (impl #root::Future<Output = ()> + 'a, Self)
             where
-                T: #root::Stream<Item = I> + Unpin + 'a,
+                T: #root::Stream<Item = #root::Result<I>> + Unpin + 'a,
                 U: #root::Sink<O, Error = #root::Error> + Unpin + 'a,
             {
                 let (driver, client) = #root::RpcClient::new_with_driver(recv, send);
