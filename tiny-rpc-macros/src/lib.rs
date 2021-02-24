@@ -208,9 +208,12 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                     let rsp = match req {
                         #(
                             #req_ident::#fn_name(_args) => {
-                                #rsp_ident::#fn_name(
+                                #root::tracing::debug!(#root::concat!("=> ", #root::stringify!(#fn_name)));
+                                let ret = #rsp_ident::#fn_name(
                                     T::#fn_name(#(#fn_arg_expr)*) #fn_asyncness
-                                )
+                                );
+                                #root::tracing::debug!(#root::concat!("<= ", #root::stringify!(#fn_name)));
+                                ret
                             }
                         )*
                     };
@@ -260,16 +263,24 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                     let id = #root::RequestId(
                         self.1.fetch_add(1, #root::Ordering::SeqCst)
                     );
-                    let req = O::from_parts(
-                        id,
-                        #req_ident::#fn_name((#(#stub_arg_name,)*)),
-                    )?;
-                    let rsp = self.0.make_request(req).await?;
-                    match I::get_data(rsp)? {
-                        #rsp_ident::#fn_name(r) => Ok(r),
-                        #rsp_ident::__server_error => Err(#root::Error::ServerError(id)),
-                        _ => Err(#root::Error::ResponseMismatch(id)),
-                    }
+                    #root::Instrument::instrument(
+                        async move {
+                            let req = O::from_parts(
+                                id,
+                                #req_ident::#fn_name((#(#stub_arg_name,)*)),
+                            )?;
+                            #root::tracing::debug!(#root::concat!("=> ", #root::stringify!(#fn_name)));
+                            let rsp = self.0.make_request(req).await?;
+                            #root::tracing::debug!(#root::concat!("<= ", #root::stringify!(#fn_name)));
+                            match I::get_data(rsp)? {
+                                #rsp_ident::#fn_name(r) => Ok(r),
+                                #rsp_ident::__server_error => Err(#root::Error::ServerError(id)),
+                                _ => Err(#root::Error::ResponseMismatch(id)),
+                            }
+                        },
+                        #root::tracing::debug_span!("client", %id),
+                    )
+                    .await
                 }
             )*
         }

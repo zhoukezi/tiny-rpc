@@ -5,7 +5,9 @@ pub mod re_export {
 
     pub use std::{
         boxed::Box,
+        concat,
         pin::Pin,
+        stringify,
         sync::{
             atomic::{AtomicU64, Ordering},
             Arc,
@@ -14,6 +16,7 @@ pub mod re_export {
 
     pub use futures::{Future, Sink, Stream};
     pub use serde_derive::{Deserialize, Serialize};
+    pub use tracing::Instrument;
 
     pub use super::*;
     pub use crate::error::{Error, Result};
@@ -26,6 +29,7 @@ use futures::{
     future::{select, Either},
     Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
 };
+use tracing::Instrument;
 
 use crate::error::{Error, Result};
 
@@ -94,16 +98,22 @@ where
     loop {
         match fut.await {
             Either::Left((Some(req), r)) => {
+                let req = req?;
+                let id = req.get_id();
                 let stub = stub.clone();
                 let mut tx = tx.clone();
-                tokio::spawn(stub.make_response(req?).then(move |res| async move {
-                    if let Some(res) = res {
-                        if let Err(e) = tx.send(res).await {
-                            assert!(e.is_disconnected());
-                            error!("driver closed unexpectedly");
-                        }
-                    }
-                }));
+                tokio::spawn(
+                    stub.make_response(req)
+                        .instrument(debug_span!("server", %id))
+                        .then(move |res| async move {
+                            if let Some(res) = res {
+                                if let Err(e) = tx.send(res).await {
+                                    assert!(e.is_disconnected());
+                                    error!("driver closed unexpectedly");
+                                }
+                            }
+                        }),
+                );
                 fut = select(recv.next(), r);
             }
             Either::Right((Some(rsp), r)) => {
