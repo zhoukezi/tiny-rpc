@@ -16,7 +16,7 @@ pub trait RpcSerializer: Send + Sync + 'static {
     fn deserialize_from<T: DeserializeOwned, R: Read>(reader: R) -> Result<T, Error>;
 
     fn serialize_size_hint<T: Serialize>(_value: &T) -> usize {
-        16
+        120
     }
 }
 
@@ -84,9 +84,14 @@ impl<S: RpcSerializer> From<SerializedFrame<S>> for Bytes {
 
 impl<T: Serialize + DeserializeOwned, S: RpcSerializer> RpcFrame<T> for SerializedFrame<S> {
     fn from_parts(id: RequestId, data: T) -> Result<Self, Error> {
-        let mut buf = BytesMut::with_capacity(8 + S::serialize_size_hint(&data));
+        let cap = 8 + S::serialize_size_hint(&data);
+        trace!("init with cap = {}", cap);
+        let mut buf = BytesMut::with_capacity(cap);
         buf.put_u64(id.0);
-        S::serialize_to(&mut buf[8..], &data)?;
+        let mut writer = buf.writer();
+        S::serialize_to(&mut writer, &data)?;
+        let buf = writer.into_inner();
+        trace!("fini with len = {}, cap = {}", buf.len(), buf.capacity());
         Ok(Self(buf.freeze(), PhantomData))
     }
 
