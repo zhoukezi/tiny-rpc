@@ -164,10 +164,8 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
                             callback
                                 .send(Err(e))
                                 .unwrap_or_else(|_| panic!("client closed unexpectedly"));
-                        } else {
-                            if req_map.insert(id, callback).is_some() {
-                                panic!("request id is not unique")
-                            }
+                        } else if req_map.insert(id, callback).is_some() {
+                            panic!("request id is not unique")
                         }
                         fut = select(rx.next(), r);
                     }
@@ -194,8 +192,7 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
             };
             if let Err(e) = ret {
                 let mut e = Some(e);
-                let mut iter = req_map.into_iter();
-                while let Some((_id, r)) = iter.next() {
+                for (_id, r) in req_map.into_iter() {
                     match r.send(Err(e.take().unwrap())) {
                         Ok(()) => break,
                         Err(r) => {
