@@ -173,7 +173,7 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
                         if let Err(e) = send.send(req).await {
                             callback
                                 .send(Err(e))
-                                .unwrap_or_else(|_| panic!("client closed unexpectedly"));
+                                .unwrap_or_else(|_| error!("client closed unexpectedly"));
                         } else if req_map.insert(id, callback).is_some() {
                             panic!("request id is not unique")
                         }
@@ -188,7 +188,7 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
                         if let Some(callback) = req_map.remove(&id) {
                             callback
                                 .send(Ok(rsp))
-                                .unwrap_or_else(|_| panic!("client closed unexpectedly"));
+                                .unwrap_or_else(|_| error!("client closed unexpectedly"));
                         } else {
                             warn!("Server responeded for nonexist request: {}", id);
                         }
