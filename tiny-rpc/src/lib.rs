@@ -1,7 +1,7 @@
 // required to use define_rpc macro inside this crate
 extern crate self as tiny_rpc;
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 pub mod error;
 pub mod io;

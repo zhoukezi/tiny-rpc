@@ -1,7 +1,7 @@
 #[doc(hidden)]
 pub mod re_export {
-    pub extern crate log;
     pub extern crate serde;
+    pub extern crate tracing;
 
     pub use std::{
         boxed::Box,

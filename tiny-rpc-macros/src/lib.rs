@@ -199,9 +199,9 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                     let req = match I::get_data(req) {
                         Ok(req) => req,
                         Err(e) => {
-                            #root::log::error!("failed to get request: {} {}", id, e);
+                            #root::tracing::error!("failed to get request: {} {}", id, e);
                             return O::from_parts(id, #rsp_ident::__server_error)
-                                .map_err(|e| #root::log::error!("failed to return server error: {} {}", id, e))
+                                .map_err(|e| #root::tracing::error!("failed to return server error: {} {}", id, e))
                                 .ok();
                         }
                     };
@@ -215,7 +215,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                         )*
                     };
                     O::from_parts(id, rsp)
-                        .map_err(|e| #root::log::error!("failed to response: {} {}", id, e))
+                        .map_err(|e| #root::tracing::error!("failed to response: {} {}", id, e))
                         .ok()
                 })
             }

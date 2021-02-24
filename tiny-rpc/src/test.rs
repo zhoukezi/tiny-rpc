@@ -68,10 +68,15 @@ pub async fn run_example() {
 
 #[tokio::test]
 async fn example_test() {
-    env_logger::Builder::default()
-        .filter_level(log::LevelFilter::Warn)
-        .parse_default_env()
-        .init();
+    use tracing::subscriber;
+    use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+    let _guard = subscriber::set_default(
+        FmtSubscriber::builder()
+            .with_test_writer()
+            .with_env_filter(EnvFilter::from_default_env())
+            .finish(),
+    );
 
     run_example().await
 }
