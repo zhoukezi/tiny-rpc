@@ -46,10 +46,11 @@ pub fn to_lower_snake(ident: &Ident) -> Ident {
     )
 }
 
+pub type FlagsMap = HashMap<String, Ident>;
+pub type PropsMap = HashMap<String, (Ident, Lit)>;
+
 #[allow(dead_code)]
-pub fn parse_meta(
-    attr: &Attribute,
-) -> Option<(HashMap<String, Ident>, HashMap<String, (Ident, Lit)>)> {
+pub fn parse_meta(attr: &Attribute) -> Option<(FlagsMap, PropsMap)> {
     let (mut flags, mut props) = Default::default();
     let meta = attr.parse_meta().ok()?;
     match meta {
