@@ -172,7 +172,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         #[serde(crate = #serde_path)]
         #[allow(non_camel_case_types)]
         pub enum #rsp_ident {
-            __server_error,
+            __server_failed,
             #(#fn_name(#fn_ret_ty),)*
         }
 
@@ -200,7 +200,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                         Ok(req) => req,
                         Err(e) => {
                             #root::tracing::error!("failed to get request: {} {}", id, e);
-                            return O::from_parts(id, #rsp_ident::__server_error)
+                            return O::from_parts(id, #rsp_ident::__server_failed)
                                 .map_err(|e| #root::tracing::error!("failed to return server error: {} {}", id, e))
                                 .ok();
                         }
@@ -274,7 +274,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                             #root::tracing::debug!(#root::concat!("<= ", #root::stringify!(#fn_name)));
                             match I::get_data(rsp)? {
                                 #rsp_ident::#fn_name(r) => Ok(r),
-                                #rsp_ident::__server_error => Err(#root::Error::ServerError(id)),
+                                #rsp_ident::__server_failed => Err(#root::Error::ServerFailed(id)),
                                 _ => Err(#root::Error::ResponseMismatch(id)),
                             }
                         },

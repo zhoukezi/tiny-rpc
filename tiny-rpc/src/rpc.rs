@@ -202,13 +202,13 @@ impl<'a, R: Rpc, I: RpcFrame<R::Response>, O: RpcFrame<R::Request>> RpcClient<'a
             };
             if let Err(e) = ret {
                 let mut e = Some(e);
-                for (_id, r) in req_map.into_iter() {
+                for (_id, r) in req_map {
                     match r.send(Err(e.take().unwrap())) {
                         Ok(()) => break,
                         Err(r) => {
                             e = match r {
                                 Err(x) => Some(x),
-                                _ => unreachable!(),
+                                Ok(_) => unreachable!(),
                             };
                         }
                     }
