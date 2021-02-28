@@ -129,8 +129,10 @@ where
     }
 }
 
+type ClientCallback<R, S> = (oneshot::Sender<Result<R>>, S);
+
 pub struct RpcClient<'a, R: Rpc, T: Transport<R::Response, R::Request>>(
-    mpsc::Sender<(oneshot::Sender<Result<T::RecvFrame>>, T::SendFrame)>,
+    mpsc::Sender<ClientCallback<T::RecvFrame, T::SendFrame>>,
     PhantomData<&'a R>,
 );
 
@@ -150,7 +152,7 @@ where
 impl<'a, R: Rpc, T: Transport<R::Response, R::Request> + 'a> RpcClient<'a, R, T> {
     pub fn new_with_driver(transport: T) -> (impl Future<Output = ()> + 'a, Self) {
         async fn driver<'a, R, T>(
-            mut rx: mpsc::Receiver<(oneshot::Sender<Result<T::RecvFrame>>, T::SendFrame)>,
+            mut rx: mpsc::Receiver<ClientCallback<T::RecvFrame, T::SendFrame>>,
             transport: T,
         ) where
             R: Rpc,
