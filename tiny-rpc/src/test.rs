@@ -35,8 +35,7 @@ pub async fn run_example() {
 
         tiny_rpc::rpc::serve(
             HelloServer::new(HelloImpl(String::from("local pipe"))),
-            srx,
-            stx,
+            (srx, stx),
         )
         .await
         .unwrap();
@@ -45,7 +44,7 @@ pub async fn run_example() {
 
     // construct a client and call hello
     info!("create stub");
-    let mut stub1 = HelloStub::new(crx, ctx);
+    let mut stub1 = HelloStub::new((crx, ctx));
     let mut stub2 = stub1.clone();
 
     let join1 = tokio::spawn(async move {

@@ -7,7 +7,10 @@ use std::{
 use futures::{ready, Sink, Stream};
 use pin_project::pin_project;
 
-use crate::error::Error;
+use crate::{
+    error::Error,
+    rpc::{RequestId, RpcFrame},
+};
 
 mod sealed {
     use futures::{Sink, Stream};
@@ -126,4 +129,47 @@ pub fn into_rpc_stream<T, S: IntoRpcStream<T>>(stream: S) -> RpcStream<T, S> {
 
 pub fn into_rpc_sink<T, U, S: IntoRpcSink<T, U>>(sink: S) -> RpcSink<T, U, S> {
     sink.into_rpc_sink()
+}
+
+pub trait Transport<R, S> {
+    type RecvFrame: RpcFrame<R>;
+    type SendFrame: RpcFrame<S>;
+    type RecvStream: Stream<Item = Result<Self::RecvFrame, Error>> + Unpin;
+    type SendSink: Sink<Self::SendFrame, Error = Error> + Unpin;
+
+    fn into_pair(self) -> (Self::RecvStream, Self::SendSink);
+}
+
+impl<R, S, I, O> Transport<R, S> for (I, O)
+where
+    R: Send + 'static,
+    S: Send + 'static,
+    I: Stream<Item = Result<(RequestId, R), Error>> + Unpin,
+    O: Sink<(RequestId, S), Error = Error> + Unpin,
+{
+    type RecvFrame = (RequestId, R);
+    type SendFrame = (RequestId, S);
+    type RecvStream = I;
+    type SendSink = O;
+
+    fn into_pair(self) -> (Self::RecvStream, Self::SendSink) {
+        self
+    }
+}
+
+impl<R, S, T, U, I, O> Transport<R, S> for (I, O, PhantomData<U>)
+where
+    T: RpcFrame<R>,
+    U: RpcFrame<S>,
+    I: Stream<Item = Result<T, Error>> + Unpin,
+    O: Sink<U, Error = Error> + Unpin,
+{
+    type RecvFrame = T;
+    type SendFrame = U;
+    type RecvStream = I;
+    type SendSink = O;
+
+    fn into_pair(self) -> (Self::RecvStream, Self::SendSink) {
+        (self.0, self.1)
+    }
 }

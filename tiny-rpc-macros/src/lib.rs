@@ -184,23 +184,22 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
             }
         }
 
-        impl<T, I, O> #root::RpcServerStub<#rpc_ident, I, O> for #api_server_ident<T>
+        impl<T, U> #root::RpcServerStub<#rpc_ident, T> for #api_server_ident<U>
         where
-            T: #impl_ident + Send + Sync + 'static,
-            I: #root::RpcFrame<#req_ident>,
-            O: #root::RpcFrame<#rsp_ident>,
+            T: #root::Transport<#req_ident, #rsp_ident>,
+            U: #impl_ident + Send + Sync + 'static,
         {
             fn make_response(
                 self: #root::Arc<Self>,
-                req: I,
-            ) -> #root::Pin<#root::Box<dyn #root::Future<Output = Option<O>> + Send>> {
+                req: T::RecvFrame,
+            ) -> #root::Pin<#root::Box<dyn #root::Future<Output = Option<T::SendFrame>> + Send>> {
                 #root::Box::pin(async move {
-                    let id = I::get_id(&req);
-                    let req = match I::get_data(req) {
+                    let id = <T::RecvFrame as #root::RpcFrame<_>>::get_id(&req);
+                    let req = match <T::RecvFrame as #root::RpcFrame<_>>::get_data(req) {
                         Ok(req) => req,
                         Err(e) => {
                             #root::tracing::error!("failed to get request: {} {}", id, e);
-                            return O::from_parts(id, #rsp_ident::__server_failed)
+                            return <T::SendFrame as #root::RpcFrame<_>>::from_parts(id, #rsp_ident::__server_failed)
                                 .map_err(|e| #root::tracing::error!("failed to return server error: {} {}", id, e))
                                 .ok();
                         }
@@ -210,14 +209,14 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                             #req_ident::#fn_name(_args) => {
                                 #root::tracing::debug!(#root::concat!("=> ", #root::stringify!(#fn_name)));
                                 let ret = #rsp_ident::#fn_name(
-                                    T::#fn_name(#(#fn_arg_expr)*) #fn_asyncness
+                                    U::#fn_name(#(#fn_arg_expr)*) #fn_asyncness
                                 );
                                 #root::tracing::debug!(#root::concat!("<= ", #root::stringify!(#fn_name)));
                                 ret
                             }
                         )*
                     };
-                    O::from_parts(id, rsp)
+                    <T::SendFrame as #root::RpcFrame<_>>::from_parts(id, rsp)
                         .map_err(|e| #root::tracing::error!("failed to response: {} {}", id, e))
                         .ok()
                 })
@@ -225,36 +224,31 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
         }
 
         #[derive(Debug)]
-        #vis struct #api_stub_ident<'a, I, O>(
-            #root::RpcClient<'a, #rpc_ident, I, O>,
+        #vis struct #api_stub_ident<'a, T>(
+            #root::RpcClient<'a, #rpc_ident, T>,
             #root::Arc<#root::AtomicU64>
         )
         where
-            I: #root::RpcFrame<#rsp_ident>,
-            O: #root::RpcFrame<#req_ident>;
+            T: #root::Transport<#rsp_ident, #req_ident>;
 
-        impl<'a, I, O> #api_stub_ident<'a, I, O>
+        impl<'a, T> #api_stub_ident<'a, T>
         where
-            I: #root::RpcFrame<#rsp_ident>,
-            O: #root::RpcFrame<#req_ident>,
+            T: #root::Transport<#rsp_ident, #req_ident> + 'a,
         {
-            pub fn new<T, U>(recv: T, send: U) -> Self
+            pub fn new(transport: T) -> Self
             where
-                T: #root::Stream<Item = #root::Result<I>> + Unpin + Send + 'static,
-                U: #root::Sink<O, Error = #root::Error> + Unpin + Send + 'static,
+                T: Send + 'static,
+                T::RecvStream: Send,
+                T::SendSink: Send,
             {
                 Self(
-                    #root::RpcClient::new(recv, send),
+                    #root::RpcClient::new(transport),
                     #root::Arc::new(#root::AtomicU64::new(5)),
                 )
             }
 
-            pub fn new_with_driver<T, U>(recv: T, send: U) -> (impl #root::Future<Output = ()> + 'a, Self)
-            where
-                T: #root::Stream<Item = #root::Result<I>> + Unpin + 'a,
-                U: #root::Sink<O, Error = #root::Error> + Unpin + 'a,
-            {
-                let (driver, client) = #root::RpcClient::new_with_driver(recv, send);
+            pub fn new_with_driver(transport: T) -> (impl #root::Future<Output = ()> + 'a, Self) {
+                let (driver, client) = #root::RpcClient::new_with_driver(transport);
                 (driver, Self(client, #root::Arc::new(#root::AtomicU64::new(5))))
             }
 
@@ -265,14 +259,14 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
                     );
                     #root::Instrument::instrument(
                         async move {
-                            let req = O::from_parts(
+                            let req = <T::SendFrame as #root::RpcFrame<_>>::from_parts(
                                 id,
                                 #req_ident::#fn_name((#(#stub_arg_name,)*)),
                             )?;
                             #root::tracing::debug!(#root::concat!("=> ", #root::stringify!(#fn_name)));
                             let rsp = self.0.make_request(req).await?;
                             #root::tracing::debug!(#root::concat!("<= ", #root::stringify!(#fn_name)));
-                            match I::get_data(rsp)? {
+                            match <T::RecvFrame as #root::RpcFrame<_>>::get_data(rsp)? {
                                 #rsp_ident::#fn_name(r) => Ok(r),
                                 #rsp_ident::__server_failed => Err(#root::Error::ServerFailed(id)),
                                 _ => Err(#root::Error::ResponseMismatch(id)),
@@ -285,10 +279,9 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
             )*
         }
 
-        impl<'a, I, O> Clone for #api_stub_ident<'a, I, O>
+        impl<'a, T> Clone for #api_stub_ident<'a, T>
         where
-            I: #root::RpcFrame<#rsp_ident>,
-            O: #root::RpcFrame<#req_ident>,
+            T: #root::Transport<#rsp_ident, #req_ident>,
         {
             #[inline]
             fn clone(&self) -> Self {
