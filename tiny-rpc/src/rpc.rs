@@ -14,12 +14,12 @@ pub mod re_export {
         },
     };
 
-    pub use futures::{Future, Sink, Stream};
+    pub use futures::Future;
     pub use serde_derive::{Deserialize, Serialize};
     pub use tracing::Instrument;
 
     pub use super::*;
-    pub use crate::error::{Error, Result};
+    pub use crate::error::Error;
     pub use crate::io::Transport;
 }
 
