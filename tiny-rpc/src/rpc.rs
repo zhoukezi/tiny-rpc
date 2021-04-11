@@ -128,7 +128,7 @@ pub trait Client: Sized {
                         trace!("finish request {}", id);
 
                         if let Some(handler) = req_map.remove(&id) {
-                            if let Err(_) = handler.send(Ok(rsp_frame)) {
+                            if handler.send(Ok(rsp_frame)).is_err() {
                                 debug!("respond to canceled request: {}", id);
                             }
                         } else {
@@ -140,7 +140,7 @@ pub trait Client: Sized {
                         let id = req_frame.id().expect("misformed outgoing frame");
                         trace!("begin request {}", id);
 
-                        if let Some(_) = req_map.insert(id, rsp_handler) {
+                        if req_map.insert(id, rsp_handler).is_some() {
                             panic!("id duplication: {}", id);
                         }
                         send.send(req_frame).await?;

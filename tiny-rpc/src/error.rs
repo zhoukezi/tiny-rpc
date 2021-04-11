@@ -97,9 +97,9 @@ impl Display for ProtocolError {
 
 impl StdError for ProtocolError {}
 
-impl Into<Error> for ProtocolError {
-    fn into(self) -> Error {
-        Error::Protocol(self)
+impl From<ProtocolError> for Error {
+    fn from(e: ProtocolError) -> Self {
+        Self::Protocol(e)
     }
 }
 

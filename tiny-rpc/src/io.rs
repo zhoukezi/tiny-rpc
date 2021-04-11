@@ -44,6 +44,12 @@ impl IdGenerator {
     }
 }
 
+impl Default for IdGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct RpcFrame(Bytes);
 
 impl RpcFrame {
@@ -78,9 +84,12 @@ impl RpcFrame {
     }
 }
 
+pub type GenericStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'static>>;
+pub type GenericSink<T, E> = Pin<Box<dyn Sink<T, Error = E> + Send + Sync + 'static>>;
+
 pub struct Transport {
-    input: Pin<Box<dyn Stream<Item = Result<RpcFrame>> + Send + Sync + 'static>>,
-    output: Pin<Box<dyn Sink<RpcFrame, Error = Error> + Send + Sync + 'static>>,
+    input: GenericStream<Result<RpcFrame>>,
+    output: GenericSink<RpcFrame, Error>,
 }
 
 impl Transport {
@@ -129,8 +138,8 @@ impl Transport {
 
         let tx1 = tx1.sink_map_err(|_| Error::Io(std::io::ErrorKind::ConnectionAborted.into()));
         let tx2 = tx2.sink_map_err(|_| Error::Io(std::io::ErrorKind::ConnectionAborted.into()));
-        let rx1 = rx1.map(|e| Ok(e));
-        let rx2 = rx2.map(|e| Ok(e));
+        let rx1 = rx1.map(Ok);
+        let rx2 = rx2.map(Ok);
 
         let transport_l = Self::from_framed_pair(rx1, tx2);
         let transport_r = Self::from_framed_pair(rx2, tx1);
@@ -140,8 +149,8 @@ impl Transport {
     pub fn split(
         self,
     ) -> (
-        Pin<Box<dyn Stream<Item = Result<RpcFrame>> + Send + Sync + 'static>>,
-        Pin<Box<dyn Sink<RpcFrame, Error = Error> + Send + Sync + 'static>>,
+        GenericStream<Result<RpcFrame>>,
+        GenericSink<RpcFrame, Error>,
     ) {
         (self.input, self.output)
     }

@@ -39,7 +39,7 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
     ret.into()
 }
 
-fn gen_func_list<'a>(trait_body: &'a ItemTrait) -> Vec<Cow<'a, TraitItemMethod>> {
+fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
     let ref_receiver = parse_quote!(&self); // const
 
     trait_body
@@ -151,7 +151,7 @@ fn gen_req_rsp<'a>(
     root: &Path,
     vis: &Visibility,
     ident: &Ident,
-    func_list: &Vec<Cow<'a, TraitItemMethod>>,
+    func_list: &[Cow<'a, TraitItemMethod>],
 ) -> (proc_macro2::TokenStream, Ident, Ident) {
     let unit_type = parse_quote!(()); // const
 
@@ -204,7 +204,7 @@ fn gen_server<'a>(
     ident: &Ident,
     req_ident: &Ident,
     rsp_ident: &Ident,
-    func_list: &Vec<Cow<'a, TraitItemMethod>>,
+    func_list: &[Cow<'a, TraitItemMethod>],
 ) -> proc_macro2::TokenStream {
     let null_stream = quote! {}; // const
     let keyword_await = quote! { .await }; // const
@@ -291,7 +291,7 @@ fn gen_client<'a>(
     ident: &Ident,
     req_ident: &Ident,
     rsp_ident: &Ident,
-    func_list: &Vec<Cow<'a, TraitItemMethod>>,
+    func_list: &[Cow<'a, TraitItemMethod>],
 ) -> proc_macro2::TokenStream {
     let unit_type: Type = parse_quote!(()); // const
 
