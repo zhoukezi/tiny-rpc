@@ -1,6 +1,6 @@
 [package]
 name = "tiny-rpc"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["zhoukz <me@zhoukz.com>"]
 edition = "2018"
 license = "MIT"
@@ -16,7 +16,7 @@ pin-project = "1.0.5"
 serde = "1.0.123"
 serde_derive = "1.0.123"
 serde_json = "1.0.62"
-tiny-rpc-macros = { version = "=0.2.0", path = "../tiny-rpc-macros" }
+tiny-rpc-macros = { version = "=0.3.0", path = "../tiny-rpc-macros" }
 tokio = { version = "1.2.0", features = ["rt"] }
 tokio-util = { version = "*", features = ["codec"] }
 tracing = "0.1.24"
