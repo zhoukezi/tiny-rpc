@@ -1,4 +1,4 @@
-// required to use define_rpc macro inside this crate
+// required to use proc macros inside this crate
 extern crate self as tiny_rpc;
 #[macro_use]
 extern crate tracing;
@@ -6,7 +6,6 @@ extern crate tracing;
 pub mod error;
 pub mod io;
 pub mod rpc;
-pub mod serialize;
 #[cfg(test)]
 pub mod test;
 

@@ -1,175 +1,148 @@
 use std::{
-    marker::PhantomData,
+    convert::TryInto,
+    mem::size_of,
     pin::Pin,
-    task::{Context, Poll},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-use futures::{ready, Sink, Stream};
-use pin_project::pin_project;
+use bincode::{deserialize_from, serialize_into, serialized_size};
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::{channel::mpsc, future::ready, Sink, SinkExt, Stream, StreamExt};
+use serde::{de::DeserializeOwned, Serialize};
+use tokio::io::{split, AsyncRead, AsyncWrite};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::{
-    error::Error,
-    rpc::{RequestId, RpcFrame},
-};
+use crate::error::{Error, Result};
 
-mod sealed {
-    use futures::{Sink, Stream};
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct Id(u64);
 
-    pub trait StreamSealed<T>: Stream {}
-
-    pub trait SinkSealed<T, U>: Sink<U> {}
-
-    impl<T, S: Stream> StreamSealed<T> for S {}
-
-    impl<T, U, S: Sink<U>> SinkSealed<T, U> for S {}
+impl Id {
+    pub const NULL: Id = Id(0);
 }
 
-pub trait IntoRpcStream<T>: Stream + Sized {
-    fn map(item: Self::Item) -> Result<T, Error>;
-    fn into_rpc_stream(self) -> RpcStream<T, Self> {
-        RpcStream {
-            inner: self,
-            _marker: PhantomData,
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:016X}]", self.0)
+    }
+}
+
+#[derive(Clone)]
+pub struct IdGenerator(Arc<AtomicU64>);
+
+impl IdGenerator {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicU64::new(5)))
+    }
+
+    pub fn next(&self) -> Id {
+        Id(self.0.fetch_add(1, Ordering::SeqCst))
+    }
+}
+
+pub struct RpcFrame(Bytes);
+
+impl RpcFrame {
+    pub fn new<T: Serialize>(id: Id, data: T) -> Result<Self> {
+        let cap = size_of::<Id>() + serialized_size(&data)? as usize;
+        let mut buf = BytesMut::with_capacity(cap);
+        buf.put_u64(id.0);
+        let mut writer = buf.writer();
+        serialize_into(&mut writer, &data)?;
+        let buf = writer.into_inner();
+        assert_eq!(cap, buf.capacity());
+        Ok(Self(buf.freeze()))
+    }
+
+    pub fn id(&self) -> Result<Id> {
+        self.0
+            .get(0..size_of::<Id>())
+            .map(|buf| {
+                Id(u64::from_be_bytes(
+                    buf.try_into().expect("infallible: hardcode slice size"),
+                ))
+            })
+            .ok_or(Error::Serialize(None))
+    }
+
+    pub fn data<T: DeserializeOwned>(&self) -> Result<T> {
+        Ok(deserialize_from(
+            self.0
+                .get(size_of::<Id>()..)
+                .ok_or(Error::Serialize(None))?,
+        )?)
+    }
+}
+
+pub struct Transport {
+    input: Pin<Box<dyn Stream<Item = Result<RpcFrame>> + Send + Sync + 'static>>,
+    output: Pin<Box<dyn Sink<RpcFrame, Error = Error> + Send + Sync + 'static>>,
+}
+
+impl Transport {
+    pub fn from_streamed<T>(io: T) -> Self
+    where
+        T: AsyncRead + AsyncWrite + Send + Sync + 'static,
+    {
+        let (reader, writer) = split(io);
+        Self::from_streamed_pair(reader, writer)
+    }
+
+    pub fn from_streamed_pair<R, W>(reader: R, writer: W) -> Self
+    where
+        R: AsyncRead + Send + Sync + 'static,
+        W: AsyncWrite + Send + Sync + 'static,
+    {
+        let stream = FramedRead::new(reader, LengthDelimitedCodec::default())
+            .map(|buf| buf.map(BytesMut::freeze).map(RpcFrame).map_err(Error::from));
+        let sink = FramedWrite::new(writer, LengthDelimitedCodec::default())
+            .with(|frame: RpcFrame| ready(Ok(frame.0)));
+        Self::from_framed_pair(stream, sink)
+    }
+
+    pub fn from_framed<T>(io: T) -> Self
+    where
+        T: Stream<Item = Result<RpcFrame>> + Sink<RpcFrame, Error = Error> + Send + Sync + 'static,
+    {
+        let (sink, stream) = io.split();
+        Self::from_framed_pair(stream, sink)
+    }
+
+    pub fn from_framed_pair<T, U>(stream: T, sink: U) -> Self
+    where
+        T: Stream<Item = Result<RpcFrame>> + Send + Sync + 'static,
+        U: Sink<RpcFrame, Error = Error> + Send + Sync + 'static,
+    {
+        Self {
+            input: Box::pin(stream),
+            output: Box::pin(sink),
         }
     }
-}
 
-impl<T, U, E, S> IntoRpcStream<T> for S
-where
-    U: Into<T>,
-    E: Into<Error>,
-    S: Stream<Item = Result<U, E>> + sealed::StreamSealed<T>,
-{
-    fn map(item: Self::Item) -> Result<T, Error> {
-        item.map(Into::into).map_err(Into::into)
-    }
-}
+    pub fn new_local() -> (Self, Self) {
+        let (tx1, rx1) = mpsc::unbounded::<RpcFrame>();
+        let (tx2, rx2) = mpsc::unbounded::<RpcFrame>();
 
-pub trait IntoRpcSink<T, U>: Sink<U> + Sized {
-    fn map(item: T) -> U;
-    fn map_err(err: Self::Error) -> Error;
-    fn into_rpc_sink(self) -> RpcSink<T, U, Self> {
-        RpcSink {
-            inner: self,
-            _marker: PhantomData,
-        }
-    }
-}
+        let tx1 = tx1.sink_map_err(|_| Error::Io(std::io::ErrorKind::ConnectionAborted.into()));
+        let tx2 = tx2.sink_map_err(|_| Error::Io(std::io::ErrorKind::ConnectionAborted.into()));
+        let rx1 = rx1.map(|e| Ok(e));
+        let rx2 = rx2.map(|e| Ok(e));
 
-impl<T, U, E, S> IntoRpcSink<T, U> for S
-where
-    U: From<T>,
-    E: Into<Error>,
-    S: Sink<U, Error = E> + sealed::SinkSealed<T, U>,
-{
-    fn map(item: T) -> U {
-        item.into()
+        let transport_l = Self::from_framed_pair(rx1, tx2);
+        let transport_r = Self::from_framed_pair(rx2, tx1);
+        (transport_l, transport_r)
     }
 
-    fn map_err(err: Self::Error) -> Error {
-        err.into()
-    }
-}
-
-#[pin_project]
-pub struct RpcStream<T, S: IntoRpcStream<T>> {
-    #[pin]
-    inner: S,
-    _marker: PhantomData<T>,
-}
-
-impl<T, S: IntoRpcStream<T>> Stream for RpcStream<T, S> {
-    type Item = Result<T, Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        let next = ready!(this.inner.poll_next(cx)).map(S::map);
-        Poll::Ready(next)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-#[pin_project]
-pub struct RpcSink<T, U, S: IntoRpcSink<T, U>> {
-    #[pin]
-    inner: S,
-    _marker: PhantomData<(T, U)>,
-}
-
-impl<T, U, S: IntoRpcSink<T, U>> Sink<T> for RpcSink<T, U, S> {
-    type Error = Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.inner.poll_ready(cx).map(|res| res.map_err(S::map_err))
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let this = self.project();
-        this.inner.start_send(S::map(item)).map_err(S::map_err)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.inner.poll_flush(cx).map(|res| res.map_err(S::map_err))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.inner.poll_close(cx).map(|res| res.map_err(S::map_err))
-    }
-}
-
-pub fn into_rpc_stream<T, S: IntoRpcStream<T>>(stream: S) -> RpcStream<T, S> {
-    stream.into_rpc_stream()
-}
-
-pub fn into_rpc_sink<T, U, S: IntoRpcSink<T, U>>(sink: S) -> RpcSink<T, U, S> {
-    sink.into_rpc_sink()
-}
-
-pub trait Transport<R, S> {
-    type RecvFrame: RpcFrame<R>;
-    type SendFrame: RpcFrame<S>;
-    type RecvStream: Stream<Item = Result<Self::RecvFrame, Error>> + Unpin;
-    type SendSink: Sink<Self::SendFrame, Error = Error> + Unpin;
-
-    fn into_pair(self) -> (Self::RecvStream, Self::SendSink);
-}
-
-impl<R, S, I, O> Transport<R, S> for (I, O)
-where
-    R: Send + 'static,
-    S: Send + 'static,
-    I: Stream<Item = Result<(RequestId, R), Error>> + Unpin,
-    O: Sink<(RequestId, S), Error = Error> + Unpin,
-{
-    type RecvFrame = (RequestId, R);
-    type SendFrame = (RequestId, S);
-    type RecvStream = I;
-    type SendSink = O;
-
-    fn into_pair(self) -> (Self::RecvStream, Self::SendSink) {
-        self
-    }
-}
-
-impl<R, S, T, U, I, O> Transport<R, S> for (I, O, PhantomData<U>)
-where
-    T: RpcFrame<R>,
-    U: RpcFrame<S>,
-    I: Stream<Item = Result<T, Error>> + Unpin,
-    O: Sink<U, Error = Error> + Unpin,
-{
-    type RecvFrame = T;
-    type SendFrame = U;
-    type RecvStream = I;
-    type SendSink = O;
-
-    fn into_pair(self) -> (Self::RecvStream, Self::SendSink) {
-        (self.0, self.1)
+    pub fn split(
+        self,
+    ) -> (
+        Pin<Box<dyn Stream<Item = Result<RpcFrame>> + Send + Sync + 'static>>,
+        Pin<Box<dyn Sink<RpcFrame, Error = Error> + Send + Sync + 'static>>,
+    ) {
+        (self.input, self.output)
     }
 }

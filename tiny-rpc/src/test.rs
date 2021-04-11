@@ -1,72 +1,39 @@
-use futures::{SinkExt, StreamExt};
-use tiny_rpc_macros::rpc_define;
+use std::time::Duration;
 
-rpc_define! {
+use futures::StreamExt;
+
+tiny_rpc_macros::rpc_define! {
     #[async_trait::async_trait]
-    pub trait Hello {
-        fn hello(name: String) -> String;
+    pub trait ProcMacroRpc {
+        fn hello(&self,name: String) -> String;
         async fn delay(&self) -> String;
+        fn p(&self,t:(u32,u32));
     }
 }
 
-pub async fn run_example() {
-    struct HelloImpl(String);
-    #[async_trait::async_trait]
-    impl HelloServerImpl for HelloImpl {
-        fn hello(name: String) -> String {
-            format!("Hello, {}!", name)
-        }
-
-        async fn delay(&self) -> String {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            format!("Hello, client at {}!", self.0)
-        }
-    }
-
-    let (ctx, srx) = futures::channel::mpsc::channel::<(crate::rpc::RequestId, HelloRequest)>(128);
-    let (stx, crx) = futures::channel::mpsc::channel::<(crate::rpc::RequestId, HelloResponse)>(128);
-    let ctx = ctx.sink_map_err(|_| panic!());
-    let stx = stx.sink_map_err(|_| panic!());
-    let srx = srx.map(|e| Ok(e));
-    let crx = crx.map(|e| Ok(e));
-
-    tokio::spawn(async move {
-        info!("server task spawned");
-
-        tiny_rpc::rpc::serve(
-            HelloServer::new(HelloImpl(String::from("local pipe"))),
-            (srx, stx),
-        )
-        .await
-        .unwrap();
-        info!("server drop");
-    });
-
-    // construct a client and call hello
-    info!("create stub");
-    let mut stub1 = HelloStub::new((crx, ctx));
-    let mut stub2 = stub1.clone();
-
-    let join1 = tokio::spawn(async move {
-        for _ in 0..128 {
-            info!("call hello ...");
-            let res = stub1.hello("world".to_owned()).await.unwrap();
-            info!("... with return value {}", res);
-            assert_eq!(res, "Hello, world!");
-        }
-    });
-    let join2 = tokio::spawn(async move {
-        info!("call delay ...");
-        let res = stub2.delay().await.unwrap();
-        info!("... with return value {}", res);
-        assert_eq!(res, "Hello, client at local pipe!");
-    });
-    join1.await.unwrap();
-    join2.await.unwrap();
+#[tiny_rpc_macros::rpc_trait]
+#[async_trait::async_trait]
+pub trait AttrRpc {
+    fn non_async_func(&self, magic: i32) -> bool;
+    async fn delay(&self, delay_ms: u32) -> u32;
 }
 
 #[tokio::test]
-async fn example_test() {
+async fn basic_test() {
+    struct Impl;
+
+    #[async_trait::async_trait]
+    impl AttrRpc for Impl {
+        fn non_async_func(&self, magic: i32) -> bool {
+            magic == 42
+        }
+
+        async fn delay(&self, delay_ms: u32) -> u32 {
+            tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
+            delay_ms
+        }
+    }
+
     use tracing::subscriber;
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
@@ -77,5 +44,26 @@ async fn example_test() {
             .finish(),
     );
 
-    run_example().await
+    let (server_transport, client_transport) = crate::io::Transport::new_local();
+
+    let join = tokio::spawn(async move {
+        let mut spawn_stream = AttrRpcServer::serve(Impl, server_transport);
+        while let Some(fut) = spawn_stream.next().await {
+            tokio::spawn(fut);
+        }
+    });
+    let (client, driver) = AttrRpcClient::new(client_transport);
+    let join2 = tokio::spawn(driver);
+
+    let client2 = client.clone();
+    tokio::spawn(async move {
+        client2.non_async_func(42).await.unwrap();
+    });
+
+    client.delay(1000).await.unwrap();
+
+    drop(client);
+
+    join.await.unwrap();
+    join2.await.unwrap();
 }

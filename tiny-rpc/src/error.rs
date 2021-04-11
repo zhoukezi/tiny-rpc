@@ -1,23 +1,60 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, error::Error as StdError, fmt::Display};
 
-use err_derive::Error;
+use crate::io::Id;
 
-use crate::rpc::RequestId;
-
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error(display = "no response for request {}", _0)]
-    MissingResponse(RequestId),
-    #[error(display = "unrelated respond for request {}", _0)]
-    ResponseMismatch(RequestId),
-    #[error(display = "server failed to respond for request {}", _0)]
-    ServerFailed(RequestId),
-    #[error(display = "driver stopped unexpectedly")]
-    DriverStopped,
-    #[error(display = "io error: {}", _0)]
+    Protocol(ProtocolError),
     Io(std::io::Error),
-    #[error(display = "other error: {}", _0)]
-    Other(Box<dyn std::error::Error + Sync + Send + 'static>),
+    Serialize(Option<bincode::Error>),
+    Driver,
+    Spawner,
+    Other(Box<dyn StdError + Send + Sync + 'static>),
+    Unspecified,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Protocol(e) => {
+                write!(f, "protocol error: {}", e)
+            }
+            Error::Io(e) => {
+                write!(f, "io error: {}", e)
+            }
+            Error::Serialize(e) => {
+                write!(f, "serialize error: ")?;
+                if let Some(e) = e {
+                    write!(f, "{}", e)
+                } else {
+                    write!(f, "internal error")
+                }
+            }
+            Error::Driver => {
+                write!(f, "driver stopped unexpectedly")
+            }
+            Error::Spawner => {
+                write!(f, "spawner stopped unexpectedly")
+            }
+            Error::Other(e) => {
+                write!(f, "other error: {}", e)
+            }
+            Error::Unspecified => {
+                write!(f, "unspecified error")
+            }
+        }
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Error::Io(e) => Some(e),
+            Error::Serialize(e) => e.as_ref().map(|e| e.as_ref() as &(dyn StdError + 'static)),
+            Error::Other(e) => Some(e.as_ref() as &(dyn StdError + 'static)),
+            _ => None,
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -35,6 +72,34 @@ impl From<Infallible> for Error {
 impl<E: std::error::Error + Sync + Send + 'static> From<Box<E>> for Error {
     fn from(e: Box<E>) -> Self {
         Self::Other(e)
+    }
+}
+
+// TODO more details
+#[derive(Debug)]
+pub enum ProtocolError {
+    MartianResponse,
+    ResponseMismatch(Id),
+}
+
+impl Display for ProtocolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProtocolError::MartianResponse => {
+                write!(f, "response of non-exist request")
+            }
+            ProtocolError::ResponseMismatch(_) => {
+                write!(f, "response for different function")
+            }
+        }
+    }
+}
+
+impl StdError for ProtocolError {}
+
+impl Into<Error> for ProtocolError {
+    fn into(self) -> Error {
+        Error::Protocol(self)
     }
 }
 
