@@ -18,7 +18,7 @@ serde_derive = "1.0.123"
 serde_json = "1.0.62"
 tiny-rpc-macros = { version = "=0.3.0", path = "../tiny-rpc-macros" }
 tokio = { version = "1.2.0", features = ["rt"] }
-tokio-util = { version = "*", features = ["codec"] }
+tokio-util = { version = "0.6.5", features = ["codec"] }
 tracing = "0.1.24"
 
 [dev-dependencies]
