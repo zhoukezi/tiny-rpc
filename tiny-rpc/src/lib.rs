@@ -10,3 +10,4 @@ pub mod rpc;
 pub mod test;
 
 pub use tiny_rpc_macros::rpc_define;
+pub use tiny_rpc_macros::rpc_trait;
