@@ -1,5 +1,3 @@
-mod helper;
-
 use std::borrow::Cow;
 
 use proc_macro::TokenStream;
