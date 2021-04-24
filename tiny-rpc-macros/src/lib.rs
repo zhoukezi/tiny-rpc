@@ -39,8 +39,34 @@ pub fn rpc_define(trait_body: TokenStream) -> TokenStream {
     ret.into()
 }
 
+/// Check if `arg` is receiver we want, i.e., `&self`, `&'a self`, `self: &Self` and `self: &'a Self`
+fn is_ref_receiver(arg: Option<&FnArg>) -> bool {
+    let arg = match arg {
+        Some(arg) => arg,
+        None => return false,
+    };
+
+    match arg {
+        FnArg::Receiver(receiver) => receiver.reference.is_some() && receiver.mutability.is_none(), // `&self`, not `self` or `&mut self`
+        FnArg::Typed(PatType { pat, ty, .. }) => {
+            matches!(pat.as_ref(), Pat::Ident(ident) if ident.ident == "self") // `self: T`
+                && matches!(
+                    ty.as_ref(),
+                    Type::Reference(TypeReference{ mutability, elem, ..})
+                        if mutability.is_none() && matches!(elem.as_ref(), Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self")) // `self: T` where T is a reference to `Self`
+                )
+        }
+    }
+}
+
+/// Generate a list of trait method.
+///
+/// This function emit error and generate dummy for following cases:
+///  - A trait method which has a default implementation.
+///  - The first input is not `&self` or its equivalent.
+///  - An input is given in pattern, e.g., `(x, y): (f32, f32)`.
 fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
-    let ref_receiver = parse_quote!(&self); // const
+    let ref_receiver: FnArg = parse_quote!(&self); // const
 
     trait_body
         .items
@@ -62,14 +88,15 @@ fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
                     dummy.default = None;
                     method = Cow::Owned(dummy);
                 }
-                if method.sig.inputs.first() != Some(&ref_receiver) {
+
+                if !is_ref_receiver(method.sig.inputs.first()) {
                     emit_error!(method, "trait method must have `&self` receiver");
 
                     // create dummy by replace bad receiver, append one if none is provided
                     let mut dummy = method.into_owned();
                     match dummy.sig.inputs.first() {
                         Some(FnArg::Receiver(_)) => {
-                            // eg. `&mut self`
+                            // e.g., `&mut self`
                             *(dummy
                                 .sig
                                 .inputs
@@ -79,7 +106,7 @@ fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
                         }
                         Some(FnArg::Typed(PatType { pat, .. })) => match &**pat {
                             Pat::Ident(PatIdent { ident, .. }) if ident == "self" => {
-                                // eg. `self: Box<Self>`
+                                // e.g., `self: Box<Self>`
                                 *(dummy
                                     .sig
                                     .inputs
@@ -99,6 +126,7 @@ fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
                     }
                     method = Cow::Owned(dummy);
                 }
+
                 for i in 0..(method.sig.inputs.len()) {
                     if let FnArg::Typed(PatType { ref pat, .. }) = method.sig.inputs[i] {
                         match pat.as_ref() {
@@ -169,9 +197,10 @@ fn gen_req_rsp<'a>(
             .sig
             .inputs
             .iter()
-            .filter_map(|input| match input {
-                FnArg::Receiver(_) => None, // NOTE all receivers are now `&self`
-                FnArg::Typed(PatType { ty, .. }) => Some(ty),
+            .skip(1) // Skip the receiver, which must exist.
+            .map(|input| match input {
+                FnArg::Typed(PatType { ty, .. }) => ty,
+                FnArg::Receiver(_) => unreachable!(),
             })
             .collect::<Vec<_>>()
     });
@@ -372,5 +401,29 @@ fn gen_client<'a>(
                 }
             )*
         }
+    }
+}
+
+#[test]
+fn test_is_ref_receiver() {
+    let ref_receiver: &[FnArg] = &[
+        parse_quote!(self),
+        parse_quote!(&self),
+        parse_quote!(&'a self),
+        parse_quote!(&mut self),
+        parse_quote!(&'a mut self),
+        parse_quote!(self: Self),
+        parse_quote!(self: &Self),
+        parse_quote!(self: &'a Self),
+        parse_quote!(self: &mut Self),
+        parse_quote!(self: &'a mut Self),
+    ];
+    let answer = &[
+        false, true, true, false, false, false, true, true, false, false,
+    ];
+
+    assert_eq!(is_ref_receiver(None), false);
+    for (t, a) in ref_receiver.into_iter().zip(answer) {
+        assert_eq!(is_ref_receiver(Some(t)), *a);
     }
 }
