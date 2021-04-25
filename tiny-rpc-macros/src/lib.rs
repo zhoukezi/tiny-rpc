@@ -210,6 +210,7 @@ fn gen_req_rsp<'a>(
     let req_rsp = quote! {
         #[derive(#root::Serialize, #root::Deserialize)]
         #[serde(crate = #serde_path)]
+        #[serde(deny_unknown_fields)]
         #[allow(non_camel_case_types)]
         #vis enum #req_ident<'req> {
             #( #func_ident ( ( #(#input_type,)* ) ), )*
@@ -218,6 +219,7 @@ fn gen_req_rsp<'a>(
 
         #[derive(#root::Serialize, #root::Deserialize)]
         #[serde(crate = #serde_path)]
+        #[serde(deny_unknown_fields)]
         #[allow(non_camel_case_types)]
         #vis enum #rsp_ident {
             #( #func_ident ( #output_type ), )*
