@@ -2,9 +2,9 @@ name: Main
 
 on:
   push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+    branches:
+      - main
+      - ci-test
 
 env:
   CARGO_TERM_COLOR: always
