@@ -12,10 +12,8 @@ keywords = ["rpc"]
 bincode = "1.3.1"
 bytes = "1.0.1"
 futures = "0.3.12"
-pin-project = "1.0.5"
 serde = "1.0.123"
 serde_derive = "1.0.123"
-serde_json = "1.0.62"
 tiny-rpc-macros = { version = "=0.3.0", path = "../tiny-rpc-macros" }
 tokio = { version = "1.2.0", features = ["rt"] }
 tokio-util = { version = "0.6.5", features = ["codec"] }
