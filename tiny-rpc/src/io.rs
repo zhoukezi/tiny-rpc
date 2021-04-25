@@ -8,10 +8,10 @@ use std::{
     },
 };
 
-use bincode::{deserialize_from, serialize_into, serialized_size};
+use bincode::{deserialize, serialize_into, serialized_size};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{channel::mpsc, future::ready, Sink, SinkExt, Stream, StreamExt};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
@@ -75,8 +75,8 @@ impl RpcFrame {
             .ok_or(Error::Serialize(None))
     }
 
-    pub fn data<T: DeserializeOwned>(&self) -> Result<T> {
-        Ok(deserialize_from(
+    pub fn data<'a, T: Deserialize<'a>>(&'a self) -> Result<T> {
+        Ok(deserialize(
             self.0
                 .get(size_of::<Id>()..)
                 .ok_or(Error::Serialize(None))?,

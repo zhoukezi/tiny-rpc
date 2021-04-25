@@ -5,9 +5,10 @@ pub mod re_export {
     pub use std::{
         clone::Clone,
         convert::Into,
-        marker::{Send, Sync},
+        marker::{PhantomData, Send, Sync},
         stringify,
         sync::Arc,
+        unreachable,
     };
 
     pub use futures::{
@@ -22,6 +23,9 @@ pub mod re_export {
         io::{IdGenerator, RpcFrame, Transport},
         rpc::{Client, ClientDriverHandle, Server},
     };
+
+    #[derive(Serialize, Deserialize)]
+    pub enum Never {}
 }
 
 use std::collections::HashMap;

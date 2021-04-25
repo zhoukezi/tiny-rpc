@@ -211,8 +211,9 @@ fn gen_req_rsp<'a>(
         #[derive(#root::Serialize, #root::Deserialize)]
         #[serde(crate = #serde_path)]
         #[allow(non_camel_case_types)]
-        #vis enum #req_ident {
+        #vis enum #req_ident<'req> {
             #( #func_ident ( ( #(#input_type,)* ) ), )*
+            ___tiny_rpc_marker((#root::Never, #root::PhantomData<&'req ()>))
         }
 
         #[derive(#root::Serialize, #root::Deserialize)]
@@ -303,6 +304,7 @@ fn gen_server<'a>(
                                     #rsp_ident::#func_ident(self.0.#func_ident(#(#input_ident),*) #await_if_async)
                                 }
                             )*
+                            #req_ident::___tiny_rpc_marker(_) => #root::unreachable!(),
                         };
                         let rsp = #root::RpcFrame::new(id, rsp)?;
                         Ok(rsp)
