@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 // required to use proc macros inside this crate
 extern crate self as tiny_rpc;
 #[macro_use]
