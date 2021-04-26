@@ -175,6 +175,24 @@ fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
         .collect::<Vec<_>>()
 }
 
+fn has_lifetime(input: &FnArg) -> bool {
+    match input {
+        FnArg::Receiver(receiver) => receiver.reference.as_ref().unwrap().1.is_some(),
+        FnArg::Typed(PatType { ty, .. }) => ty_has_lifetime(ty),
+    }
+}
+
+fn ty_has_lifetime(ty: &Type) -> bool {
+    match ty {
+        Type::Reference(_) => true,
+        Type::Array(TypeArray { elem, .. }) => ty_has_lifetime(elem),
+        Type::Paren(TypeParen { elem, .. }) => ty_has_lifetime(elem),
+        Type::Slice(TypeSlice { elem, .. }) => ty_has_lifetime(elem.as_ref()),
+        Type::Tuple(TypeTuple { elems, .. }) => elems.iter().any(|ty| ty_has_lifetime(ty)),
+        _ => false,
+    }
+}
+
 fn gen_req_rsp<'a>(
     root: &Path,
     vis: &Visibility,
@@ -182,6 +200,7 @@ fn gen_req_rsp<'a>(
     func_list: &[Cow<'a, TraitItemMethod>],
 ) -> (proc_macro2::TokenStream, Ident, Ident) {
     let unit_type = parse_quote!(()); // const
+    let serde_borrow_attr: Attribute = parse_quote!(#[serde(borrow)]); // const
 
     let req_ident = format_ident!("{}Request", ident);
     let rsp_ident = format_ident!("{}Response", ident);
@@ -204,6 +223,13 @@ fn gen_req_rsp<'a>(
             })
             .collect::<Vec<_>>()
     });
+    let input_borrow = func_list.iter().map(|method| {
+        if method.sig.inputs.iter().any(has_lifetime) {
+            Some(&serde_borrow_attr)
+        } else {
+            None
+        }
+    });
     let output_type = func_list.iter().map(|method| match method.sig.output {
         ReturnType::Default => &unit_type,
         ReturnType::Type(_, ref ty) => ty.as_ref(),
@@ -215,7 +241,7 @@ fn gen_req_rsp<'a>(
         #[serde(deny_unknown_fields)]
         #[allow(non_camel_case_types)]
         #vis enum #req_ident<'req> {
-            #( #func_ident ( ( #(#input_type,)* ) ), )*
+            #( #func_ident ( #input_borrow ( #(#input_type,)* ) ), )*
             ___tiny_rpc_marker((#root::Never, #root::PhantomData<&'req ()>))
         }
 
