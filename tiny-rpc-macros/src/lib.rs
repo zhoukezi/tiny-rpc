@@ -65,6 +65,7 @@ fn is_ref_receiver(arg: Option<&FnArg>) -> bool {
 ///  - A trait method which has a default implementation.
 ///  - The first input is not `&self` or its equivalent.
 ///  - An input is given in pattern, e.g., `(x, y): (f32, f32)`.
+///  - A trait method which defined at least one lifetime generic parameter except `'req`
 fn gen_func_list(trait_body: &ItemTrait) -> Vec<Cow<'_, TraitItemMethod>> {
     let ref_receiver: FnArg = parse_quote!(&self); // const
 
