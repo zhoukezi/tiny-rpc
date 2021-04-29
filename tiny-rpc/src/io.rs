@@ -93,6 +93,13 @@ pub struct Transport {
 }
 
 impl Transport {
+    pub fn new(
+        input: GenericStream<Result<RpcFrame>>,
+        output: GenericSink<RpcFrame, Error>,
+    ) -> Self {
+        Self { input, output }
+    }
+
     pub fn from_streamed<T>(io: T) -> Self
     where
         T: AsyncRead + AsyncWrite + Send + Sync + 'static,
@@ -126,10 +133,7 @@ impl Transport {
         T: Stream<Item = Result<RpcFrame>> + Send + Sync + 'static,
         U: Sink<RpcFrame, Error = Error> + Send + Sync + 'static,
     {
-        Self {
-            input: Box::pin(stream),
-            output: Box::pin(sink),
-        }
+        Self::new(Box::pin(stream), Box::pin(sink))
     }
 
     pub fn new_local() -> (Self, Self) {
