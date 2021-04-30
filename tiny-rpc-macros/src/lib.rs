@@ -292,15 +292,15 @@ fn gen_server<'a>(
         pub struct #server_ident<T: #ident + #root::Send + #root::Sync + 'static>(#root::Arc<T>);
 
         impl<T: #ident + #root::Send + #root::Sync + 'static> #server_ident<T> {
-            pub fn serve(server_impl: T, transport: #root::Transport) -> #root::BoxStream<'static, #root::BoxFuture<'static, ()>> {
+            pub fn serve(server_impl: T, transport: #root::Transport) -> #root::BoxFuture<'static, #root::Result<#root::Transport>> {
                 Self::__internal_serve(Self(#root::Arc::new(server_impl)), transport)
             }
 
-            pub fn serve_arc(server_impl: #root::Arc<T>, transport: #root::Transport) -> #root::BoxStream<'static, #root::BoxFuture<'static, ()>> {
+            pub fn serve_arc(server_impl: #root::Arc<T>, transport: #root::Transport) -> #root::BoxFuture<'static, #root::Result<#root::Transport>> {
                 Self::__internal_serve(Self(server_impl), transport)
             }
 
-            fn __internal_serve(self, transport: #root::Transport) -> #root::BoxStream<'static, #root::BoxFuture<'static, ()>> {
+            fn __internal_serve(self, transport: #root::Transport) -> #root::BoxFuture<'static, #root::Result<#root::Transport>> {
                 #root::Server::serve(self, transport)
             }
         }
@@ -396,7 +396,7 @@ fn gen_client<'a>(
         }
 
         impl #client_ident {
-            pub fn new(transport: #root::Transport) -> (Self, #root::BoxFuture<'static, ()>) {
+            pub fn new(transport: #root::Transport) -> (Self, #root::BoxFuture<'static, #root::Result<#root::Transport>>) {
                 #root::Client::new(transport)
             }
 

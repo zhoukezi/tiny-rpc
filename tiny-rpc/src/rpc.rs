@@ -33,9 +33,9 @@ use std::collections::HashMap;
 use futures::{
     channel::{mpsc, oneshot},
     future::{select, BoxFuture, Either},
-    stream::BoxStream,
     FutureExt, SinkExt, StreamExt,
 };
+use tokio::spawn;
 use tracing::Instrument;
 
 use crate::{
@@ -45,12 +45,10 @@ use crate::{
 
 pub trait Server: Clone + Send + Sync + 'static {
     fn make_response(self, req: RpcFrame) -> BoxFuture<'static, Result<RpcFrame>>;
-    fn serve(self, transport: Transport) -> BoxStream<'static, BoxFuture<'static, ()>> {
+    fn serve(self, transport: Transport) -> BoxFuture<'static, Result<Transport>> {
         trace!("server start");
 
         let (mut recv, mut send) = transport.split();
-        let (spawner_tx, spawner_rx) = mpsc::unbounded::<BoxFuture<'static, ()>>();
-        let spawner = spawner_tx.clone();
         let serve_fut = async move {
             let (tx, mut rx) = mpsc::unbounded::<RpcFrame>();
             let mut fut = select(recv.next(), rx.next());
@@ -71,13 +69,12 @@ pub trait Server: Clone + Send + Sync + 'static {
                             let rsp_frame = this.make_response(req_frame).await?; // TODO send server fail
                             tx.unbounded_send(rsp_frame).map_err(|_| Error::Driver)?;
                             Ok::<_, Error>(())
-                        }
-                        .map(|r: Result<()>| log_error("responser", r))
-                        .instrument(span)
-                        .boxed();
-                        spawner
-                            .unbounded_send(rsp_fut)
-                            .map_err(|_| Error::Spawner)?;
+                        };
+                        let rsp_fut = rsp_fut
+                            .map(|r: Result<()>| log_error("responser", r))
+                            .instrument(span)
+                            .boxed();
+                        spawn(rsp_fut);
                         fut = select(recv.next(), r);
                     }
                     Either::Right((Some(rsp_frame), r)) => {
@@ -88,21 +85,14 @@ pub trait Server: Clone + Send + Sync + 'static {
                         fut = select(r, rx.next());
                     }
                     _ => {
-                        // None is returned from client or remote. Stop driver.
+                        // None is returned from remote. Stop driver.
                         trace!("server stop");
-                        break Ok(());
+                        break Ok(Transport::new(recv, send));
                     }
                 }
             }
         };
-        spawner_tx
-            .unbounded_send(Box::pin(
-                serve_fut
-                    .map(|r: Result<()>| log_error("server driver", r))
-                    .boxed(),
-            ))
-            .expect("infallible: unbounded mpsc");
-        Box::pin(spawner_rx)
+        Box::pin(serve_fut.boxed())
     }
 }
 
@@ -114,7 +104,7 @@ pub struct ClientDriverHandle {
 pub trait Client: Sized {
     fn from_handle(handle: ClientDriverHandle) -> Self;
     fn handle(&self) -> &ClientDriverHandle;
-    fn new(transport: Transport) -> (Self, BoxFuture<'static, ()>) {
+    fn new(transport: Transport) -> (Self, BoxFuture<'static, Result<Transport>>) {
         let (mut recv, mut send) = transport.split();
         let (tx, mut rx) = mpsc::unbounded::<(RpcFrame, oneshot::Sender<Result<RpcFrame>>)>();
         let dispatcher_fut = async move {
@@ -153,19 +143,14 @@ pub trait Client: Sized {
                     _ => {
                         // None is returned from client or remote. Stop driver.
                         trace!("dispatcher stop");
-                        break Ok(());
+                        break Ok(Transport::new(recv, send));
                     }
                 }
             }
         };
         let handle = ClientDriverHandle { sender: tx };
         let client = Self::from_handle(handle);
-        (
-            client,
-            dispatcher_fut
-                .map(|r: Result<()>| log_error("client driver", r))
-                .boxed(),
-        )
+        (client, dispatcher_fut.boxed())
     }
 
     fn make_request(&self, req: RpcFrame) -> BoxFuture<'static, Result<RpcFrame>> {
